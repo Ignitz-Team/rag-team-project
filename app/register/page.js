@@ -1,16 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
 import { FiEye, FiEyeOff } from "react-icons/fi";
 import { useRouter } from "next/navigation";
+import {
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  RecaptchaVerifier,
+  linkWithPhoneNumber,
+} from "firebase/auth";
+import { auth } from "@/lib/firebase";
 
 export default function Register() {
   const router = useRouter();
+  const recaptchaRef = useRef(null);
+  const confirmationResultRef = useRef(null);
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(""); // expects full format e.g. +919876543210
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
@@ -20,10 +29,12 @@ export default function Register() {
 
   const [errors, setErrors] = useState({});
 
+  // screen: "form" -> "checkEmail" -> "phoneEntry" -> "phoneOtp" -> done
   const [screen, setScreen] = useState("form");
-  const [emailOtp, setEmailOtp] = useState("");
   const [phoneOtp, setPhoneOtp] = useState("");
   const [otpError, setOtpError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const validateForm = () => {
     let newErrors = {};
@@ -32,9 +43,6 @@ export default function Register() {
 
     if (!email.trim()) newErrors.email = "Email is required";
     else if (!/^\S+@\S+\.\S+$/.test(email)) newErrors.email = "Enter a valid email address";
-
-    if (!phone.trim()) newErrors.phone = "Phone number is required";
-    else if (!/^\d{10}$/.test(phone.trim())) newErrors.phone = "Enter a valid 10-digit phone number";
 
     if (!password.trim()) newErrors.password = "Password is required";
     else if (password.length < 6) newErrors.password = "Password must be at least 6 characters";
@@ -48,49 +56,108 @@ export default function Register() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleFormSubmit = () => {
+  // Step 1: create the real Firebase account + send a real verification email
+  const handleFormSubmit = async () => {
     if (!validateForm()) return;
-    alert(`OTP sent to ${email}`);
-    setScreen("emailOtp");
+    setLoading(true);
+
+    try {
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      await sendEmailVerification(result.user);
+      setLoading(false);
+      setScreen("checkEmail");
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+      if (err.code === "auth/email-already-in-use") {
+        setErrors({ email: "This email is already registered. Please login instead." });
+      } else if (err.code === "auth/weak-password") {
+        setErrors({ password: "Password is too weak." });
+      } else {
+        setErrors({ email: "Something went wrong. Please try again." });
+      }
+    }
   };
 
-  const verifyEmailOtp = () => {
-    if (!emailOtp.trim()) { setOtpError("Please enter the OTP sent to your email."); return; }
-    if (emailOtp.trim().length !== 6) { setOtpError("Enter the 6-digit OTP sent to your email."); return; }
+  // Step 2: user has clicked the link in their inbox — reload to pick up emailVerified status
+  const checkEmailVerified = async () => {
+    setLoading(true);
+    await auth.currentUser?.reload();
+    setLoading(false);
 
-    setOtpError("");
-    alert(`Email verified. OTP sent to ${phone}`);
-    setScreen("phoneOtp");
+    if (auth.currentUser?.emailVerified) {
+      setScreen("phoneEntry");
+    } else {
+      alert("Email not verified yet. Please click the link we sent to your inbox first.");
+    }
   };
 
-  // -------------------------
-  // Demo mode: no Firebase — just save the registered user locally
-  // -------------------------
-  const verifyPhoneOtp = () => {
-    if (!phoneOtp.trim()) { setOtpError("Please enter the OTP sent to your phone."); return; }
-    if (phoneOtp.trim().length !== 6) { setOtpError("Enter the 6-digit OTP sent to your phone."); return; }
+  const resendVerificationEmail = async () => {
+    if (resendCooldown > 0) return;
+    try {
+      await sendEmailVerification(auth.currentUser);
+      alert("Verification email resent.");
+      setResendCooldown(30);
+      const interval = setInterval(() => {
+        setResendCooldown((c) => {
+          if (c <= 1) { clearInterval(interval); return 0; }
+          return c - 1;
+        });
+      }, 1000);
+    } catch (err) {
+      alert("Couldn't resend right now. Please wait a moment and try again.");
+    }
+  };
 
-    setOtpError("");
-
-    const users = JSON.parse(localStorage.getItem("registeredUsers") || "[]");
-    const alreadyExists = users.some((u) => u.email.toLowerCase() === email.trim().toLowerCase());
-
-    if (!alreadyExists) {
-      users.push({
-        name: fullName,
-        email: email.trim(),
-        phone: phone.trim(),
-        password, // demo only — plain text is fine here, this is not real auth
-      });
-      localStorage.setItem("registeredUsers", JSON.stringify(users));
+  // Step 3: set up invisible reCAPTCHA and send a real SMS OTP
+  const sendPhoneOtp = async () => {
+    if (!phone.trim() || !phone.startsWith("+")) {
+      alert("Please enter your phone number in international format, e.g. +919876543210");
+      return;
     }
 
-    localStorage.setItem("userName", fullName);
-    localStorage.setItem("userEmail", email);
-    localStorage.setItem("userPhone", phone);
+    setLoading(true);
+    try {
+      if (!recaptchaRef.current) {
+        recaptchaRef.current = new RecaptchaVerifier(auth, "recaptcha-container", {
+          size: "invisible",
+        });
+      }
 
-    alert(`Welcome, ${fullName}!`);
-    router.push("/dashboard");
+      const confirmationResult = await linkWithPhoneNumber(auth.currentUser, phone, recaptchaRef.current);
+      confirmationResultRef.current = confirmationResult;
+      setLoading(false);
+      setScreen("phoneOtp");
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+      alert("Couldn't send OTP. Check the phone number format and try again.");
+    }
+  };
+
+  // Step 4: verify the real OTP the user received via SMS
+  const verifyPhoneOtp = async () => {
+    if (!phoneOtp.trim() || phoneOtp.trim().length !== 6) {
+      setOtpError("Enter the 6-digit OTP sent to your phone.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await confirmationResultRef.current.confirm(phoneOtp.trim());
+
+      localStorage.setItem("userName", fullName);
+      localStorage.setItem("userEmail", email);
+      localStorage.setItem("userPhone", phone);
+
+      setLoading(false);
+      alert(`Welcome, ${fullName}! Your account is fully verified.`);
+      router.push("/dashboard");
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+      setOtpError("Incorrect OTP. Please try again.");
+    }
   };
 
   return (
@@ -120,10 +187,6 @@ export default function Register() {
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email Address" className="w-full border border-gray-300 p-3 rounded-lg mt-2" />
               {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email}</p>}
 
-              <label className="font-medium mt-4 block">Phone Number<span className="text-red-500"> *</span></label>
-              <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone Number" className="w-full border border-gray-300 p-3 rounded-lg mt-2" />
-              {errors.phone && <p className="text-red-500 text-sm mt-1">{errors.phone}</p>}
-
               <label className="font-medium mt-4 block">Password<span className="text-red-500"> *</span></label>
               <div className="relative">
                 <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full border border-gray-300 p-3 rounded-lg mt-2 pr-11" />
@@ -148,8 +211,8 @@ export default function Register() {
               </label>
               {errors.agreed && <p className="text-red-500 text-sm mb-3">{errors.agreed}</p>}
 
-              <button onClick={handleFormSubmit} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold mt-5">
-                Register
+              <button onClick={handleFormSubmit} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold mt-5 disabled:opacity-60">
+                {loading ? "Creating account..." : "Register"}
               </button>
 
               <p className="text-center mt-6 text-gray-600">
@@ -159,52 +222,71 @@ export default function Register() {
             </>
           )}
 
-          {screen === "emailOtp" && (
+          {screen === "checkEmail" && (
             <>
-              <h2 className="text-3xl font-bold text-center mb-4">Verify Email</h2>
+              <h2 className="text-3xl font-bold text-center mb-4">Check Your Email</h2>
               <p className="text-gray-500 text-center mb-6">
-                Enter the OTP sent to<br /><span className="font-semibold">{email}</span>
+                We sent a real verification link to<br /><span className="font-semibold">{email}</span>.
+                Click it, then come back and tap the button below.
               </p>
 
-              <label className="font-medium">Email OTP<span className="text-red-500"> *</span></label>
-              <input
-                type="text" maxLength={6} value={emailOtp}
-                onChange={(e) => setEmailOtp(e.target.value)}
-                placeholder="Enter 6-digit OTP"
-                className="w-full border border-gray-300 p-3 rounded-lg mt-2 mb-2 tracking-widest text-center"
-              />
-              {otpError && <p className="text-red-500 text-sm mb-3">{otpError}</p>}
-
-              <button onClick={verifyEmailOtp} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold mt-4">
-                Verify Email
+              <button onClick={checkEmailVerified} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold disabled:opacity-60">
+                {loading ? "Checking..." : "I've verified my email"}
               </button>
-              <button onClick={() => { setScreen("form"); setOtpError(""); }} className="w-full border py-3 rounded-lg mt-4">
-                Back
+
+              <button
+                onClick={resendVerificationEmail}
+                disabled={resendCooldown > 0}
+                className="w-full border py-3 rounded-lg font-semibold mt-4 disabled:opacity-60"
+              >
+                {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend verification email"}
+              </button>
+            </>
+          )}
+
+          {screen === "phoneEntry" && (
+            <>
+              <h2 className="text-3xl font-bold text-center mb-2">Verify Your Phone</h2>
+              <p className="text-gray-500 text-center mb-6">Email verified ✓ — now let's verify your phone number.</p>
+
+              <label className="font-medium">Phone Number<span className="text-red-500"> *</span></label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+919876543210"
+                className="w-full border border-gray-300 p-3 rounded-lg mt-2 mb-2"
+              />
+              <p className="text-xs text-gray-400 mb-4">Include country code, e.g. +91 for India</p>
+
+              <div id="recaptcha-container"></div>
+
+              <button onClick={sendPhoneOtp} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold disabled:opacity-60">
+                {loading ? "Sending..." : "Send OTP"}
               </button>
             </>
           )}
 
           {screen === "phoneOtp" && (
             <>
-              <h2 className="text-3xl font-bold text-center mb-4">Verify Phone Number</h2>
+              <h2 className="text-3xl font-bold text-center mb-4">Enter OTP</h2>
               <p className="text-gray-500 text-center mb-6">
-                Enter the OTP sent to<br /><span className="font-semibold">{phone}</span>
+                Enter the 6-digit code sent via SMS to<br /><span className="font-semibold">{phone}</span>
               </p>
 
-              <label className="font-medium">Phone OTP<span className="text-red-500"> *</span></label>
               <input
                 type="text" maxLength={6} value={phoneOtp}
                 onChange={(e) => setPhoneOtp(e.target.value)}
                 placeholder="Enter 6-digit OTP"
-                className="w-full border border-gray-300 p-3 rounded-lg mt-2 mb-2 tracking-widest text-center"
+                className="w-full border border-gray-300 p-3 rounded-lg mb-2 tracking-widest text-center"
               />
               {otpError && <p className="text-red-500 text-sm mb-3">{otpError}</p>}
 
-              <button onClick={verifyPhoneOtp} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold mt-4">
-                Verify & Create Account
+              <button onClick={verifyPhoneOtp} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold disabled:opacity-60">
+                {loading ? "Verifying..." : "Verify & Create Account"}
               </button>
-              <button onClick={() => { setScreen("emailOtp"); setOtpError(""); }} className="w-full border py-3 rounded-lg mt-4">
-                Back
+              <button onClick={() => setScreen("phoneEntry")} className="w-full border py-3 rounded-lg font-semibold mt-4">
+                Change Number
               </button>
             </>
           )}

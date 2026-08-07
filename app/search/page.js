@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Search as SearchIcon, SlidersHorizontal, X, Home, Clock3, MessageCircle, User } from "lucide-react";
+import { ArrowLeft, Search as SearchIcon, SlidersHorizontal, X, Trash2, Home, Clock3, MessageCircle, User } from "lucide-react";
 import TopIcons from "@/components/TopIcons";
 import { getMemories } from "@/lib/memoryStore";
 
 const CATEGORY_OPTIONS = ["All", "Education", "Personal", "Certificates", "Photos", "Videos", "Documents", "Memories", "Others"];
+const HISTORY_KEY = "searchPageHistory";
 
 export default function SearchPage() {
   const pathname = usePathname();
@@ -17,9 +18,11 @@ export default function SearchPage() {
   const [year, setYear] = useState("All");
   const [showFilters, setShowFilters] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
+  const [history, setHistory] = useState([]);
 
   useEffect(() => {
     setMemories(getMemories(false));
+    setHistory(JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"));
   }, []);
 
   const years = ["All", ...new Set(memories.map((m) => m.year))].sort((a, b) => (a === "All" ? -1 : b === "All" ? 1 : b - a));
@@ -28,7 +31,6 @@ export default function SearchPage() {
   const hasFilter = category !== "All" || year !== "All";
   const shouldShowResults = hasQuery || hasFilter;
 
-  // Filters apply on their own even with no typed text; typed text narrows further by title
   const results = shouldShowResults
     ? memories.filter((m) => {
         if (category !== "All" && m.category !== category) return false;
@@ -39,6 +41,29 @@ export default function SearchPage() {
     : [];
 
   const activeFilterCount = (category !== "All" ? 1 : 0) + (year !== "All" ? 1 : 0);
+
+  const saveToHistory = (text) => {
+    if (!text.trim()) return;
+    const entry = { id: Date.now(), text: text.trim(), time: new Date().toISOString() };
+    const updated = [entry, ...history.filter((h) => h.text.toLowerCase() !== text.trim().toLowerCase())].slice(0, 15);
+    setHistory(updated);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+  };
+
+  const handleQueryKeyDown = (e) => {
+    if (e.key === "Enter") saveToHistory(query);
+  };
+
+  const deleteHistoryEntry = (id) => {
+    const updated = history.filter((h) => h.id !== id);
+    setHistory(updated);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+  };
+
+  const clearAllHistory = () => {
+    setHistory([]);
+    localStorage.setItem(HISTORY_KEY, "[]");
+  };
 
   const navItems = [
     { href: "/dashboard", label: "Home", icon: Home },
@@ -61,18 +86,17 @@ export default function SearchPage() {
 
       <div className="max-w-3xl mx-auto mt-8 px-6">
 
-        <div className="relative mb-6">
+        <div className="relative mb-4">
           <SearchIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleQueryKeyDown}
+            onBlur={() => saveToHistory(query)}
             placeholder="Type to search, or just set a filter..."
             className="w-full border rounded-xl p-3 pl-10 pr-12 bg-white"
           />
-          <button
-            onClick={() => setShowFilters((s) => !s)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg hover:bg-gray-100"
-          >
+          <button onClick={() => setShowFilters((s) => !s)} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg hover:bg-gray-100">
             <SlidersHorizontal size={18} className={activeFilterCount > 0 ? "text-blue-600" : "text-gray-400"} />
             {activeFilterCount > 0 && (
               <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
@@ -87,26 +111,37 @@ export default function SearchPage() {
                 <h3 className="font-semibold">Filters</h3>
                 <button onClick={() => setShowFilters(false)}><X size={16} /></button>
               </div>
-
               <label className="text-xs font-semibold text-gray-500 uppercase">Year</label>
               <select value={year} onChange={(e) => setYear(e.target.value)} className="w-full border rounded-lg p-2 mt-1 mb-4">
                 {years.map((y) => <option key={y}>{y}</option>)}
               </select>
-
               <label className="text-xs font-semibold text-gray-500 uppercase">Category</label>
               <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full border rounded-lg p-2 mt-1 mb-4">
                 {CATEGORY_OPTIONS.map((c) => <option key={c}>{c}</option>)}
               </select>
-
-              <button
-                onClick={() => { setCategory("All"); setYear("All"); }}
-                className="w-full text-blue-600 text-sm font-medium py-2"
-              >
-                Clear filters
-              </button>
+              <button onClick={() => { setCategory("All"); setYear("All"); }} className="w-full text-blue-600 text-sm font-medium py-2">Clear filters</button>
             </div>
           )}
         </div>
+
+        {!hasQuery && history.length > 0 && (
+          <div className="bg-white rounded-2xl shadow p-4 mb-6">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase">Recent Searches</h3>
+              <button onClick={clearAllHistory} className="text-xs text-red-500 hover:underline">Clear all</button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {history.map((h) => (
+                <div key={h.id} className="flex items-center gap-1 bg-gray-100 rounded-full pl-3 pr-1 py-1">
+                  <button onClick={() => setQuery(h.text)} className="text-sm">{h.text}</button>
+                  <button onClick={() => deleteHistoryEntry(h.id)} className="text-gray-400 hover:text-red-500 p-1">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {!shouldShowResults ? (
           <div className="bg-white rounded-2xl shadow p-16 text-center text-gray-400">
@@ -115,7 +150,6 @@ export default function SearchPage() {
         ) : (
           <>
             <p className="text-gray-500 text-sm mb-4">{results.length} result{results.length !== 1 ? "s" : ""}</p>
-
             {results.length === 0 ? (
               <div className="bg-white rounded-2xl shadow p-16 text-center text-gray-400">
                 No memories match your search{hasFilter ? " and filters" : ""}.
@@ -133,9 +167,7 @@ export default function SearchPage() {
                         <p className="text-sm text-gray-500">{file.category} · {file.year}</p>
                       </div>
                     </div>
-                    <button onClick={() => setPreviewFile(file)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
-                      View
-                    </button>
+                    <button onClick={() => setPreviewFile(file)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">View</button>
                   </div>
                 ))}
               </div>
@@ -152,33 +184,14 @@ export default function SearchPage() {
               <h3 className="text-xl font-bold">{previewFile.title}</h3>
               <button onClick={() => setPreviewFile(null)}><X /></button>
             </div>
-
-            {previewFile.fileType?.startsWith("image/") && (
-              <img src={previewFile.preview} alt={previewFile.title} className="w-full rounded-xl" />
+            {previewFile.fileType?.startsWith("image/") && <img src={previewFile.preview} alt={previewFile.title} className="w-full rounded-xl" />}
+            {previewFile.fileType?.startsWith("video/") && <video src={previewFile.preview} controls className="w-full rounded-xl" />}
+            {previewFile.fileType === "application/pdf" && <iframe src={previewFile.preview} className="w-full h-[60vh] rounded-xl border" title={previewFile.title} />}
+            {previewFile.textContent && <pre className="whitespace-pre-wrap text-sm bg-gray-50 p-4 rounded-xl border max-h-96 overflow-y-auto">{previewFile.textContent}</pre>}
+            {previewFile.url && <a href={previewFile.url} target="_blank" rel="noopener noreferrer" className="block bg-blue-50 text-blue-600 p-4 rounded-xl break-all hover:underline">🔗 {previewFile.url}</a>}
+            {!previewFile.fileType?.startsWith("image/") && !previewFile.fileType?.startsWith("video/") && previewFile.fileType !== "application/pdf" && !previewFile.textContent && !previewFile.url && (
+              <div className="bg-gray-100 p-8 rounded-xl text-center text-gray-500">Preview not available — {previewFile.fileName}</div>
             )}
-            {previewFile.fileType?.startsWith("video/") && (
-              <video src={previewFile.preview} controls className="w-full rounded-xl" />
-            )}
-            {previewFile.fileType === "application/pdf" && (
-              <iframe src={previewFile.preview} className="w-full h-[60vh] rounded-xl border" title={previewFile.title} />
-            )}
-            {previewFile.textContent && (
-              <pre className="whitespace-pre-wrap text-sm bg-gray-50 p-4 rounded-xl border max-h-96 overflow-y-auto">{previewFile.textContent}</pre>
-            )}
-            {previewFile.url && (
-              <a href={previewFile.url} target="_blank" rel="noopener noreferrer" className="block bg-blue-50 text-blue-600 p-4 rounded-xl break-all hover:underline">
-                🔗 {previewFile.url}
-              </a>
-            )}
-            {!previewFile.fileType?.startsWith("image/") &&
-              !previewFile.fileType?.startsWith("video/") &&
-              previewFile.fileType !== "application/pdf" &&
-              !previewFile.textContent &&
-              !previewFile.url && (
-                <div className="bg-gray-100 p-8 rounded-xl text-center text-gray-500">
-                  Preview not available — {previewFile.fileName}
-                </div>
-              )}
             {previewFile.description && <p className="mt-4 text-gray-600">{previewFile.description}</p>}
           </div>
         </div>

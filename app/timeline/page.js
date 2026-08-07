@@ -170,7 +170,9 @@ export default function TimelinePage() {
                   <Calendar className="text-blue-600" />
                   <div className="text-left">
                     <h2 className="text-2xl font-bold">{year}</h2>
-                    <p className="text-gray-500">{catNames.length} Categories</p>
+                    <p className="text-gray-500">
+                        {catNames.length} Categories · {Object.values(categories).reduce((sum, files) => sum + files.length, 0)} Memories
+                    </p>
                   </div>
                 </button>
 

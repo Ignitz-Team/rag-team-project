@@ -8,13 +8,16 @@ import { getMemories } from "@/lib/memoryStore";
 
 export default function YearSummaryPage() {
   const params = useParams();
-  const year = params.year;
+  const year = decodeURIComponent(String(params.year));
 
   const [yearMemories, setYearMemories] = useState([]);
 
   useEffect(() => {
     const all = getMemories(false);
-    setYearMemories(all.filter((m) => m.year === year).sort((a, b) => new Date(a.date) - new Date(b.date)));
+    const filtered = all
+      .filter((m) => String(m.year).trim() === year.trim())
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+    setYearMemories(filtered);
   }, [year]);
 
   const categoryCounts = {};
@@ -24,24 +27,16 @@ export default function YearSummaryPage() {
   const sortedCategories = Object.entries(categoryCounts).sort((a, b) => b[1] - a[1]);
   const topCategory = sortedCategories[0];
 
-  // Build star-mark highlight bullets instead of a single paragraph
   const highlights = [];
   if (yearMemories.length > 0) {
     highlights.push(`You saved ${yearMemories.length} memor${yearMemories.length === 1 ? "y" : "ies"} in ${year}.`);
-  }
-  if (topCategory) {
-    highlights.push(`Most active category: ${topCategory[0]} (${topCategory[1]} files).`);
-  }
-  if (sortedCategories.length > 1) {
-    highlights.push(`Activity spread across ${sortedCategories.length} different categories.`);
-  }
-  const firstMemory = yearMemories[0];
-  const lastMemory = yearMemories[yearMemories.length - 1];
-  if (firstMemory) {
-    highlights.push(`First memory of the year: "${firstMemory.title}" on ${new Date(firstMemory.date).toLocaleDateString()}.`);
-  }
-  if (lastMemory && lastMemory !== firstMemory) {
-    highlights.push(`Most recent memory: "${lastMemory.title}" on ${new Date(lastMemory.date).toLocaleDateString()}.`);
+    if (topCategory) highlights.push(`Most active category: ${topCategory[0]} (${topCategory[1]} files).`);
+    if (sortedCategories.length > 1) highlights.push(`Activity spread across ${sortedCategories.length} different categories.`);
+
+    const first = yearMemories[0];
+    const last = yearMemories[yearMemories.length - 1];
+    if (first) highlights.push(`First memory of the year: "${first.title}" on ${new Date(first.date).toLocaleDateString()}.`);
+    if (last && last !== first) highlights.push(`Most recent memory: "${last.title}" on ${new Date(last.date).toLocaleDateString()}.`);
   }
 
   return (
@@ -101,9 +96,7 @@ export default function YearSummaryPage() {
                       <p className="text-xs text-gray-500">{m.category}</p>
                     </div>
                   </div>
-                  <span className="text-xs text-gray-400">
-                    {new Date(m.date).toLocaleDateString()}
-                  </span>
+                  <span className="text-xs text-gray-400">{new Date(m.date).toLocaleDateString()}</span>
                 </div>
               ))}
             </div>

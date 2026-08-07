@@ -16,11 +16,30 @@ const GREETING_REPLIES = [
   "Hey! I'm here to help you find and remember things. What are you looking for?",
 ];
 
+function findBestMatch(memories, q) {
+  const lower = q.toLowerCase();
+  const titleMatches = memories.filter((m) => m.title && (lower.includes(m.title.toLowerCase()) || m.title.toLowerCase().includes(lower)));
+  if (titleMatches.length > 0) return titleMatches[0];
+
+  const stopWords = new Set(["what", "when", "where", "which", "show", "find", "tell", "about", "have", "did", "the", "are", "my", "me", "you", "is", "was", "for", "year", "date", "in"]);
+  const words = lower.split(/\s+/).filter((w) => w.length > 2 && !stopWords.has(w));
+  if (words.length === 0) return null;
+
+  const scored = memories
+    .map((m) => {
+      const haystack = `${m.title} ${m.description} ${m.category} ${m.fileName} ${m.textContent || ""} ${m.url || ""}`.toLowerCase();
+      const score = words.reduce((acc, w) => acc + (haystack.includes(w) ? 1 : 0), 0);
+      return { m, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.length > 0 ? scored[0].m : null;
+}
+
 function generateReply(question, memories) {
   const trimmed = question.trim();
-  if (GREETING_PATTERNS.test(trimmed)) {
-    return GREETING_REPLIES[Math.floor(Math.random() * GREETING_REPLIES.length)];
-  }
+  if (GREETING_PATTERNS.test(trimmed)) return GREETING_REPLIES[Math.floor(Math.random() * GREETING_REPLIES.length)];
 
   const q = trimmed.toLowerCase();
   const yearMatch = q.match(/\b(20\d{2})\b/);
@@ -31,6 +50,28 @@ function generateReply(question, memories) {
     if (yearMatch) filtered = filtered.filter((m) => m.year === yearMatch[1]);
     if (catMatch) filtered = filtered.filter((m) => m.category?.toLowerCase() === catMatch);
     return `You have ${filtered.length} matching memor${filtered.length === 1 ? "y" : "ies"}${yearMatch ? ` in ${yearMatch[1]}` : ""}${catMatch ? ` under ${catMatch}` : ""}.`;
+  }
+
+  const asksWhen = /(which year|what year|when|what date|which date)/.test(q);
+  if (asksWhen) {
+    const match = findBestMatch(memories, q);
+    return match ? `"${match.title}" is from ${new Date(match.date).toLocaleDateString()} (${match.year}), under ${match.category}.` : "I couldn't find a memory matching that name.";
+  }
+
+  const asksContent = /(what is|what's|content|contains|about|summary|say|written|read)/.test(q);
+  if (asksContent) {
+    const match = findBestMatch(memories, q);
+    if (match) {
+      if (match.textContent) {
+        const words = q.split(/\s+/).filter((w) => w.length > 2);
+        const lines = match.textContent.split("\n").filter((l) => l.trim());
+        const relevantLines = lines.filter((line) => words.some((w) => line.toLowerCase().includes(w.toLowerCase())));
+        const snippet = (relevantLines.length > 0 ? relevantLines : lines).slice(0, 3).join(" ").trim().slice(0, 350);
+        return `From "${match.title}": "${snippet}${snippet.length >= 350 ? "..." : ""}"`;
+      }
+      if (match.url) return `"${match.title}" is a saved link: ${match.url}`;
+      return `"${match.title}" (${match.category}, ${match.year}) doesn't have readable text content, but it's saved as ${match.fileName || "a note"}.`;
+    }
   }
 
   if (yearMatch && catMatch) {
@@ -46,32 +87,17 @@ function generateReply(question, memories) {
     return inCat.length ? `Under ${catMatch}, you have: ${inCat.map((m) => m.title).join(", ")}.` : `You don't have any memories under ${catMatch} yet.`;
   }
 
-  const stopWords = new Set(["what", "when", "where", "show", "find", "tell", "about", "have", "did", "the", "are", "my", "me", "you", "is", "was", "for"]);
-  const words = q.split(/\s+/).filter((w) => w.length > 2 && !stopWords.has(w));
+  const match = findBestMatch(memories, q);
+  if (match) return `I found "${match.title}" (${match.category}, ${match.year}) — is that what you're looking for?`;
 
-  const scored = memories
-    .map((m) => {
-      const haystack = `${m.title} ${m.description} ${m.category} ${m.fileName} ${m.url || ""}`.toLowerCase();
-      const score = words.reduce((acc, w) => acc + (haystack.includes(w) ? 1 : 0), 0);
-      return { m, score };
-    })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  if (scored.length === 0) {
-    return "I couldn't find anything matching that in your memories yet. Try mentioning a year, category, or the title of what you're looking for.";
-  }
-
-  return `Here's what I found: ${scored.slice(0, 5).map((x) => x.m.title).join(", ")}.`;
+  return "I couldn't find anything matching that in your memories yet. Try mentioning a year, category, or the title of what you're looking for.";
 }
 
 export default function ChatPage() {
   const pathname = usePathname();
   const [memories, setMemories] = useState([]);
   const [history, setHistory] = useState([]);
-  const [messages, setMessages] = useState([
-    { id: 1, role: "ai", text: "Hi! Ask me about your memories, or tap + to add something new." },
-  ]);
+  const [messages, setMessages] = useState([{ id: 1, role: "ai", text: "Hi! Ask me about your memories, or tap + to add something new." }]);
   const [input, setInput] = useState("");
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -81,20 +107,23 @@ export default function ChatPage() {
   const [addUrl, setAddUrl] = useState("");
   const [addFile, setAddFile] = useState(null);
   const [addFilePreview, setAddFilePreview] = useState("");
+  const [addTextContent, setAddTextContent] = useState("");
+  const [readingFile, setReadingFile] = useState(false);
 
   const [showChoiceModal, setShowChoiceModal] = useState(false);
   const [showSaveDetailsModal, setShowSaveDetailsModal] = useState(false);
   const [pendingCategory, setPendingCategory] = useState("");
   const [pendingDate, setPendingDate] = useState(new Date().toISOString().split("T")[0]);
+  const [savingMemory, setSavingMemory] = useState(false);
+
+  const refreshMemories = () => setMemories(getMemories(false));
 
   useEffect(() => {
-    setMemories(getMemories(false));
+    refreshMemories();
     setHistory(JSON.parse(localStorage.getItem("searchHistory") || "[]"));
   }, []);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   const saveHistoryEntry = (text) => {
     const entry = { id: Date.now(), text, time: new Date().toISOString() };
@@ -117,7 +146,6 @@ export default function ChatPage() {
   const send = () => {
     const question = input.trim();
     if (!question) return;
-
     const userMsg = { id: Date.now(), role: "user", text: question };
     const reply = { id: Date.now() + 1, role: "ai", text: generateReply(question, memories) };
     setMessages((prev) => [...prev, userMsg, reply]);
@@ -126,30 +154,37 @@ export default function ChatPage() {
   };
 
   const openAddModal = () => {
-    setAddText("");
-    setAddUrl("");
-    setAddFile(null);
-    setAddFilePreview("");
+    setAddText(""); setAddUrl(""); setAddFile(null); setAddFilePreview(""); setAddTextContent("");
     setShowAddModal(true);
   };
 
+  // Reads EVERY file type as base64 (same as Upload page), so preview/fileSize
+  // is always populated and storage usage reliably increases.
   const handleFileBrowse = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setAddFile(file);
+    setReadingFile(true);
 
-    if (file.type.startsWith("image/") || file.type.startsWith("video/") || file.type === "application/pdf") {
-      const reader = new FileReader();
-      reader.onload = () => setAddFilePreview(reader.result);
-      reader.readAsDataURL(file);
-    }
+    const readerB64 = new FileReader();
+    readerB64.onload = () => {
+      setAddFilePreview(readerB64.result);
+
+      const isTextLike = file.type.startsWith("text/") || /\.(txt|csv|json|md)$/i.test(file.name);
+      if (isTextLike) {
+        const readerText = new FileReader();
+        readerText.onload = () => { setAddTextContent(readerText.result); setReadingFile(false); };
+        readerText.readAsText(file);
+      } else {
+        setReadingFile(false);
+      }
+    };
+    readerB64.readAsDataURL(file);
   };
 
   const confirmAdd = () => {
-    if (!addText.trim() && !addFile && !addUrl.trim()) {
-      alert("Please type something, attach a file, or add a URL.");
-      return;
-    }
+    if (readingFile) { alert("Please wait, still reading the file..."); return; }
+    if (!addText.trim() && !addFile && !addUrl.trim()) { alert("Please type something, attach a file, or add a URL."); return; }
     setShowAddModal(false);
     setShowChoiceModal(true);
   };
@@ -167,50 +202,51 @@ export default function ChatPage() {
     if (!pendingCategory) { alert("Please select a category."); return; }
     if (!pendingDate) { alert("Please select a date."); return; }
 
-    const title = getAddTitle();
-    const year = new Date(pendingDate).getFullYear().toString();
+    setSavingMemory(true);
+    try {
+      const title = getAddTitle();
+      const year = new Date(pendingDate).getFullYear().toString();
 
-    addMemory({
-      title,
-      description: addUrl.trim() ? `Link: ${addUrl.trim()}` : (addFile ? "Added from chat with attached file" : "Added from chat"),
-      category: pendingCategory,
-      date: pendingDate,
-      year,
-      fileName: addFile?.name || "",
-      fileType: addFile?.type || (addUrl.trim() ? "text/url" : "text/note"),
-      preview: addFilePreview,
-      url: addUrl.trim(),
-    });
+      const saved = addMemory({
+        title,
+        description: addUrl.trim() ? `Link: ${addUrl.trim()}` : (addFile ? "Added from chat with attached file" : "Added from chat"),
+        category: pendingCategory,
+        date: pendingDate,
+        year,
+        fileName: addFile?.name || "",
+        fileType: addFile?.type || (addUrl.trim() ? "text/url" : "text/note"),
+        preview: addFilePreview,
+        textContent: addTextContent || addText.trim(),
+        url: addUrl.trim(),
+      });
 
-    setMemories(getMemories(false));
+      refreshMemories();
 
-    setMessages((prev) => [
-      ...prev,
-      { id: Date.now(), role: "ai", text: `Saved "${title}" to your memories under ${pendingCategory} on ${pendingDate}. Ask me anything about it!` },
-    ]);
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now(), role: "ai", text: `Saved "${saved.title}" to your memories under ${saved.category} on ${saved.date}. Storage usage updated. Ask me anything about it!` },
+      ]);
 
-    setShowSaveDetailsModal(false);
-    resetAddState();
+      setShowSaveDetailsModal(false);
+      resetAddState();
+    } catch (err) {
+      console.error(err);
+      alert("Couldn't save — the file may be too large for local storage.");
+    } finally {
+      setSavingMemory(false);
+    }
   };
 
   const chooseKeepInHistoryOnly = () => {
     const title = getAddTitle();
     saveHistoryEntry(title);
-
-    setMessages((prev) => [
-      ...prev,
-      { id: Date.now(), role: "ai", text: `Got it — I've noted "${title}" in your chat history without saving it to Memories.` },
-    ]);
-
+    setMessages((prev) => [...prev, { id: Date.now(), role: "ai", text: `Got it — I've noted "${title}" in your chat history without saving it to Memories.` }]);
     setShowChoiceModal(false);
     resetAddState();
   };
 
   const resetAddState = () => {
-    setAddText("");
-    setAddUrl("");
-    setAddFile(null);
-    setAddFilePreview("");
+    setAddText(""); setAddUrl(""); setAddFile(null); setAddFilePreview(""); setAddTextContent("");
   };
 
   const navItems = [
@@ -240,30 +276,19 @@ export default function ChatPage() {
               <MessageSquareText size={16} className="text-gray-400" />
               <h3 className="text-sm font-semibold text-gray-500 uppercase">History</h3>
             </div>
-            {history.length > 0 && (
-              <button onClick={clearAllHistory} className="text-xs text-red-500 hover:underline">Clear all</button>
-            )}
+            {history.length > 0 && <button onClick={clearAllHistory} className="text-xs text-red-500 hover:underline">Clear all</button>}
           </div>
-
           {history.length === 0 ? (
             <p className="text-xs text-gray-400">Nothing here yet.</p>
           ) : (
             <div className="space-y-2">
               {history.map((h) => (
                 <div key={h.id} className="flex items-center gap-1 group">
-                  <button
-                    onClick={() => setInput(h.text)}
-                    className="flex-1 text-left text-sm p-2 rounded-lg hover:bg-gray-100 min-w-0"
-                  >
+                  <button onClick={() => setInput(h.text)} className="flex-1 text-left text-sm p-2 rounded-lg hover:bg-gray-100 min-w-0">
                     <p className="truncate">{h.text}</p>
                     <p className="text-[10px] text-gray-400">{new Date(h.time).toLocaleDateString()}</p>
                   </button>
-                  <button
-                    onClick={() => deleteHistoryEntry(h.id)}
-                    className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 p-1"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <button onClick={() => deleteHistoryEntry(h.id)} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 p-1"><Trash2 size={14} /></button>
                 </div>
               ))}
             </div>
@@ -274,28 +299,15 @@ export default function ChatPage() {
           <div className="flex-1 space-y-4 overflow-y-auto p-6" style={{ maxHeight: "60vh" }}>
             {messages.map((m) => (
               <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] rounded-2xl p-4 ${m.role === "user" ? "bg-blue-600 text-white" : "bg-gray-100"}`}>
-                  <p className="text-sm">{m.text}</p>
-                </div>
+                <div className={`max-w-[80%] rounded-2xl p-4 ${m.role === "user" ? "bg-blue-600 text-white" : "bg-gray-100"}`}><p className="text-sm">{m.text}</p></div>
               </div>
             ))}
             <div ref={bottomRef} />
           </div>
-
           <div className="flex gap-2 p-4 border-t">
-            <button onClick={openAddModal} className="border rounded-xl px-3 hover:bg-gray-50">
-              <Plus size={18} />
-            </button>
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && send()}
-              placeholder="Ask about your memories..."
-              className="flex-1 border rounded-xl p-3"
-            />
-            <button onClick={send} className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-xl">
-              <Send size={18} />
-            </button>
+            <button onClick={openAddModal} className="border rounded-xl px-3 hover:bg-gray-50"><Plus size={18} /></button>
+            <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Ask about your memories..." className="flex-1 border rounded-xl p-3" />
+            <button onClick={send} className="bg-blue-600 hover:bg-blue-700 text-white px-4 rounded-xl"><Send size={18} /></button>
           </div>
         </div>
 
@@ -308,37 +320,16 @@ export default function ChatPage() {
               <h3 className="text-xl font-bold">Add Something New</h3>
               <button onClick={() => setShowAddModal(false)}><X size={20} /></button>
             </div>
-
-            <textarea
-              value={addText}
-              onChange={(e) => setAddText(e.target.value)}
-              placeholder="Type a note, event, or anything you want to remember..."
-              rows={3}
-              className="w-full border rounded-xl p-3 mb-3"
-            />
-
+            <textarea value={addText} onChange={(e) => setAddText(e.target.value)} placeholder="Type a note, event, or anything you want to remember..." rows={3} className="w-full border rounded-xl p-3 mb-3" />
             <div className="relative mb-3">
               <LinkIcon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="url"
-                value={addUrl}
-                onChange={(e) => setAddUrl(e.target.value)}
-                placeholder="https://... (add a link, optional)"
-                className="w-full border rounded-xl p-3 pl-9"
-              />
+              <input type="url" value={addUrl} onChange={(e) => setAddUrl(e.target.value)} placeholder="https://... (add a link, optional)" className="w-full border rounded-xl p-3 pl-9" />
             </div>
-
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full border border-dashed rounded-xl p-3 flex items-center justify-center gap-2 text-gray-600 hover:bg-gray-50 mb-2"
-            >
-              <Paperclip size={16} /> {addFile ? addFile.name : "Browse File (optional)"}
+            <button onClick={() => fileInputRef.current?.click()} className="w-full border border-dashed rounded-xl p-3 flex items-center justify-center gap-2 text-gray-600 hover:bg-gray-50 mb-2">
+              <Paperclip size={16} /> {readingFile ? "Reading file..." : addFile ? addFile.name : "Browse File (optional)"}
             </button>
             <input ref={fileInputRef} type="file" hidden onChange={handleFileBrowse} />
-
-            <button onClick={confirmAdd} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold mt-3">
-              Add
-            </button>
+            <button onClick={confirmAdd} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold mt-3">Add</button>
           </div>
         </div>
       )}
@@ -348,13 +339,8 @@ export default function ChatPage() {
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
             <h3 className="text-xl font-bold mb-2">Save this?</h3>
             <p className="text-gray-500 text-sm mb-6 break-words">{getAddTitle()}</p>
-
-            <button onClick={chooseSaveAsMemory} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold mb-3">
-              Save to my Memories
-            </button>
-            <button onClick={chooseKeepInHistoryOnly} className="w-full border py-3 rounded-xl font-semibold">
-              Don't save — just answer & keep in chat history
-            </button>
+            <button onClick={chooseSaveAsMemory} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold mb-3">Save to my Memories</button>
+            <button onClick={chooseKeepInHistoryOnly} className="w-full border py-3 rounded-xl font-semibold">Don't save — just answer & keep in chat history</button>
           </div>
         </div>
       )}
@@ -363,27 +349,15 @@ export default function ChatPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
             <h3 className="text-xl font-bold mb-4">Save Details</h3>
-
             <label className="text-xs font-semibold text-gray-500 uppercase">Category</label>
-            <select
-              value={pendingCategory}
-              onChange={(e) => setPendingCategory(e.target.value)}
-              className="w-full border rounded-xl p-3 mt-1 mb-4"
-            >
+            <select value={pendingCategory} onChange={(e) => setPendingCategory(e.target.value)} className="w-full border rounded-xl p-3 mt-1 mb-4">
               <option value="">Select Category</option>
               {CATEGORY_OPTIONS.map((c) => <option key={c}>{c}</option>)}
             </select>
-
             <label className="text-xs font-semibold text-gray-500 uppercase">Date</label>
-            <input
-              type="date"
-              value={pendingDate}
-              onChange={(e) => setPendingDate(e.target.value)}
-              className="w-full border rounded-xl p-3 mt-1 mb-6"
-            />
-
-            <button onClick={confirmSaveMemory} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold">
-              Save & Open Chat
+            <input type="date" value={pendingDate} onChange={(e) => setPendingDate(e.target.value)} className="w-full border rounded-xl p-3 mt-1 mb-6" />
+            <button onClick={confirmSaveMemory} disabled={savingMemory} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-semibold disabled:opacity-60">
+              {savingMemory ? "Saving..." : "Save & Open Chat"}
             </button>
           </div>
         </div>
