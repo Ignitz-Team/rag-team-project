@@ -5,12 +5,7 @@ import Link from "next/link";
 import { FcGoogle } from "react-icons/fc";
 import { FiEye, FiEyeOff } from "react-icons/fi";
 import { useRouter } from "next/navigation";
-import {
-  signInWithPopup,
-  signInWithEmailAndPassword,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-} from "firebase/auth";
+import { signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
 
 export default function Login() {
@@ -21,51 +16,38 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [loading, setLoading] = useState(false);
 
-  // if login succeeds but email isn't verified, we hold the user here
-  const [needsVerification, setNeedsVerification] = useState(false);
-  const [unverifiedUser, setUnverifiedUser] = useState(null);
+  const [screen, setScreen] = useState("login");
 
-  const [screen, setScreen] = useState("login"); // "login" | "forgotEmail" | "forgotSent"
   const [forgotEmail, setForgotEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const handleLogin = async () => {
+  // -------------------------
+  // Demo mode: any non-empty password logs you in.
+  // If this email was registered before, we greet them by their real name;
+  // otherwise we just use the part before @ as a friendly name.
+  // -------------------------
+  const handleLogin = () => {
     let newErrors = {};
     if (!email.trim()) newErrors.email = "Email is required";
     if (!password.trim()) newErrors.password = "Password is required";
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
 
-    setLoading(true);
-    try {
-      const result = await signInWithEmailAndPassword(auth, email, password);
+    const users = JSON.parse(localStorage.getItem("registeredUsers") || "[]");
+    const match = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
 
-      if (!result.user.emailVerified) {
-        setUnverifiedUser(result.user);
-        setNeedsVerification(true);
-        setLoading(false);
-        return;
-      }
+    const displayName = match ? match.name : email.split("@")[0];
 
-      localStorage.setItem("userName", result.user.displayName || email.split("@")[0]);
-      localStorage.setItem("userEmail", result.user.email || email);
-      setLoading(false);
-      router.push("/dashboard");
-    } catch (err) {
-      console.error(err);
-      setLoading(false);
-      setErrors({ password: "Invalid email or password" });
-    }
-  };
+    localStorage.setItem("userName", displayName);
+    localStorage.setItem("userEmail", email);
 
-  const resendVerification = async () => {
-    try {
-      await sendEmailVerification(unverifiedUser);
-      alert("Verification email resent — check your inbox.");
-    } catch (err) {
-      alert("Couldn't resend right now, please try again shortly.");
-    }
+    router.push("/dashboard");
   };
 
   const handleGoogleLogin = async () => {
@@ -85,15 +67,36 @@ export default function Login() {
     }
   };
 
-  const handleSendResetEmail = async () => {
+  const handleSendResetOtp = () => {
     if (!forgotEmail.trim()) { alert("Please enter your email."); return; }
-    try {
-      await sendPasswordResetEmail(auth, forgotEmail.trim());
-      setScreen("forgotSent");
-    } catch (err) {
-      console.error(err);
-      alert("Couldn't send reset email. Make sure the email is registered.");
-    }
+    alert(`OTP sent to ${forgotEmail}`);
+    setScreen("forgotOtp");
+  };
+
+  const handleVerifyResetOtp = () => {
+    if (!otp.trim()) { setOtpError("Please enter the OTP."); return; }
+    if (otp.trim().length !== 6) { setOtpError("Enter the 6-digit OTP."); return; }
+    setOtpError("");
+    setScreen("forgotNewPassword");
+  };
+
+  const handleUpdatePassword = () => {
+    if (!newPassword.trim()) { alert("Please enter a new password."); return; }
+    if (newPassword.length < 6) { alert("Password must be at least 6 characters."); return; }
+    if (!confirmPassword.trim()) { alert("Please confirm your password."); return; }
+    if (newPassword !== confirmPassword) { alert("Passwords do not match."); return; }
+
+    // update the stored demo user's password, if they exist
+    const users = JSON.parse(localStorage.getItem("registeredUsers") || "[]");
+    const updated = users.map((u) =>
+      u.email.toLowerCase() === forgotEmail.trim().toLowerCase() ? { ...u, password: newPassword } : u
+    );
+    localStorage.setItem("registeredUsers", JSON.stringify(updated));
+
+    alert("Password updated successfully!");
+
+    setForgotEmail(""); setOtp(""); setNewPassword(""); setConfirmPassword("");
+    setScreen("login");
   };
 
   return (
@@ -111,7 +114,7 @@ export default function Login() {
       <div className="w-1/2 flex justify-center items-center bg-gray-100">
         <div className="bg-white p-10 rounded-2xl shadow-2xl w-[420px]">
 
-          {screen === "login" && !needsVerification && (
+          {screen === "login" && (
             <>
               <h2 className="text-3xl font-bold text-center mb-8">Login</h2>
 
@@ -132,8 +135,8 @@ export default function Login() {
                 Forgot Password?
               </p>
 
-              <button onClick={handleLogin} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold transition duration-300 disabled:opacity-60">
-                {loading ? "Logging in..." : "Login"}
+              <button onClick={handleLogin} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold transition duration-300">
+                Login
               </button>
 
               <div className="flex items-center my-6">
@@ -154,22 +157,6 @@ export default function Login() {
             </>
           )}
 
-          {needsVerification && (
-            <>
-              <h2 className="text-2xl font-bold text-center mb-4">Verify Your Email First</h2>
-              <p className="text-gray-500 text-center mb-6">
-                Your account exists, but <span className="font-semibold">{email}</span> hasn't been verified yet.
-                Check your inbox for the verification link.
-              </p>
-              <button onClick={resendVerification} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold mb-3">
-                Resend verification email
-              </button>
-              <button onClick={() => { setNeedsVerification(false); setUnverifiedUser(null); }} className="w-full border py-3 rounded-lg font-semibold">
-                Back to Login
-              </button>
-            </>
-          )}
-
           {screen === "forgotEmail" && (
             <>
               <h2 className="text-3xl font-bold text-center mb-8">Forgot Password</h2>
@@ -181,8 +168,8 @@ export default function Login() {
                 className="w-full border rounded-lg p-3 mt-2 mb-6"
               />
 
-              <button onClick={handleSendResetEmail} className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700">
-                Send Reset Link
+              <button onClick={handleSendResetOtp} className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700">
+                Send OTP
               </button>
               <button onClick={() => setScreen("login")} className="w-full border mt-4 py-3 rounded-lg">
                 Back to Login
@@ -190,14 +177,67 @@ export default function Login() {
             </>
           )}
 
-          {screen === "forgotSent" && (
+          {screen === "forgotOtp" && (
             <>
-              <h2 className="text-2xl font-bold text-center mb-4">Check Your Email</h2>
+              <h2 className="text-3xl font-bold text-center mb-8">Email Verification</h2>
               <p className="text-gray-500 text-center mb-6">
-                A real password reset link has been sent to<br /><span className="font-semibold">{forgotEmail}</span>.
-                Click it to set a new password, then come back and log in.
+                Enter the OTP sent to<br /><span className="font-semibold">{forgotEmail}</span>
               </p>
-              <button onClick={() => setScreen("login")} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold">
+
+              <label className="font-medium">OTP<span className="text-red-500"> *</span></label>
+              <input
+                type="text" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value)}
+                placeholder="Enter OTP"
+                className="w-full border rounded-lg p-3 mt-2 mb-2 tracking-widest text-center"
+              />
+              {otpError && <p className="text-red-500 text-sm mb-4">{otpError}</p>}
+
+              <button onClick={handleVerifyResetOtp} className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700">
+                Verify OTP
+              </button>
+              <button onClick={() => { setScreen("forgotEmail"); setOtpError(""); }} className="w-full border mt-4 py-3 rounded-lg">
+                Back
+              </button>
+            </>
+          )}
+
+          {screen === "forgotNewPassword" && (
+            <>
+              <h2 className="text-3xl font-bold text-center mb-8">Reset Password</h2>
+
+              <label className="font-medium">New Password<span className="text-red-500"> *</span></label>
+              <div className="relative">
+                <input
+                  type={showNewPassword ? "text" : "password"} value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter new password"
+                  className="w-full border rounded-lg p-3 mt-2 mb-5 pr-11"
+                />
+                <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 mt-1 text-gray-500 hover:text-gray-700" tabIndex={-1}>
+                  {showNewPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
+                </button>
+              </div>
+
+              <label className="font-medium">Confirm Password<span className="text-red-500"> *</span></label>
+              <div className="relative">
+                <input
+                  type={showConfirmPassword ? "text" : "password"} value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Confirm new password"
+                  className="w-full border rounded-lg p-3 mt-2 pr-11"
+                />
+                <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 mt-1 text-gray-500 hover:text-gray-700" tabIndex={-1}>
+                  {showConfirmPassword ? <FiEyeOff size={20} /> : <FiEye size={20} />}
+                </button>
+              </div>
+              {confirmPassword && newPassword !== confirmPassword && (
+                <p className="text-red-500 text-sm mt-2">Passwords do not match.</p>
+              )}
+
+              <button onClick={handleUpdatePassword} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold mt-6">
+                Update Password
+              </button>
+              <button onClick={() => setScreen("login")} className="w-full border py-3 rounded-lg mt-4">
                 Back to Login
               </button>
             </>

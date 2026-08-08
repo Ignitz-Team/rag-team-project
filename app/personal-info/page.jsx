@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Camera, CircleUserRound, Pencil } from "lucide-react";
+import { saveUserProfile } from "@/lib/userProfile";
 
 export default function PersonalInfoPage() {
   const router = useRouter();
@@ -18,7 +19,7 @@ export default function PersonalInfoPage() {
   const [joinedDate, setJoinedDate] = useState("");
 
   const [editing, setEditing] = useState(false);
-  const [saved, setSaved] = useState(false); // stays true until back arrow is clicked
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     setPhoto(localStorage.getItem("userPhoto") || "");
@@ -45,6 +46,8 @@ export default function PersonalInfoPage() {
     reader.onload = () => {
       localStorage.setItem("userPhoto", reader.result);
       setPhoto(reader.result);
+      // persist immediately, tied to this email, so it survives logout
+      saveUserProfile(email, { photo: reader.result });
     };
     reader.readAsDataURL(file);
     e.target.value = "";
@@ -59,8 +62,11 @@ export default function PersonalInfoPage() {
     localStorage.setItem("userDob", dob);
     localStorage.setItem("userLocation", location);
 
+    // permanent, keyed by email — this is what survives logout/login
+    saveUserProfile(email, { name, phone, dob, location, joinedDate });
+
     setEditing(false);
-    setSaved(true); // no auto-hide — stays until user leaves via back arrow
+    setSaved(true);
   };
 
   const handleBack = () => {
@@ -118,7 +124,7 @@ export default function PersonalInfoPage() {
           <input disabled={!editing} value={name} onChange={(e) => setName(e.target.value)} className="w-full border rounded-xl p-3 mb-5 disabled:bg-gray-50 disabled:text-gray-500" />
 
           <label className="block font-semibold mb-2">Email Address</label>
-          <input disabled={!editing} type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border rounded-xl p-3 mb-5 disabled:bg-gray-50 disabled:text-gray-500" />
+          <input disabled type="email" value={email} className="w-full border rounded-xl p-3 mb-5 bg-gray-50 text-gray-500" />
 
           <label className="block font-semibold mb-2">Phone Number</label>
           <input disabled={!editing} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border rounded-xl p-3 mb-5 disabled:bg-gray-50 disabled:text-gray-500" />
