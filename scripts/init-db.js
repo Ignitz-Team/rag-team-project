@@ -33,10 +33,12 @@ async function main() {
         deleted_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         file_size INTEGER DEFAULT 0,
-        user_email TEXT
+        user_email TEXT,
+        location TEXT
       );
 
       ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_email TEXT;
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS location TEXT;
       CREATE INDEX IF NOT EXISTS memories_user_email_idx ON memories (user_email);
 
       CREATE TABLE IF NOT EXISTS users (

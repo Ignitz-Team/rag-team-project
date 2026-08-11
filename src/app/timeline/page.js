@@ -229,7 +229,10 @@ export default function TimelinePage() {
                                   <p className="font-medium">
                                     {file.fileType?.startsWith("image/") ? "🖼" : file.fileType?.startsWith("video/") ? "🎬" : file.url ? "🔗" : "📄"} {file.title}
                                   </p>
-                                  <p className="text-sm text-gray-500">Category: {file.category} · {file.date}</p>
+                                  <p className="text-sm text-gray-500">
+                                    Category: {file.category} · {file.date}
+                                    {file.location && <> · 📍 {file.location}</>}
+                                  </p>
                                 </div>
                               </div>
                               <button onClick={() => setPreviewFile(file)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">

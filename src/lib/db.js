@@ -40,12 +40,14 @@ export async function ensureTables() {
       deleted_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       file_size INTEGER DEFAULT 0,
-      user_email TEXT
+      user_email TEXT,
+      location TEXT
     );
   `);
 
-  // Migration for databases created before per-user scoping existed.
+  // Migration for databases created before per-user scoping / location existed.
   await query(`ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_email TEXT;`);
+  await query(`ALTER TABLE memories ADD COLUMN IF NOT EXISTS location TEXT;`);
   await query(`CREATE INDEX IF NOT EXISTS memories_user_email_idx ON memories (user_email);`);
 
   await query(`

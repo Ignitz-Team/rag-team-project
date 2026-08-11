@@ -37,6 +37,7 @@ export default function UploadPage() {
   const [category, setCategory] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [date, setDate] = useState(today);
+  const [location, setLocation] = useState("");
   const [uploadMode, setUploadMode] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -107,7 +108,10 @@ export default function UploadPage() {
     setSelectedFiles([]);
     setDate(today);
     setUploadMode("");
+    setLocation("");
   };
+
+  const showLocationField = category === "Photos" || category === "Videos";
 
   const handleUpload = async () => {
     if (!category) { alert("Please select a category."); return; }
@@ -127,6 +131,7 @@ export default function UploadPage() {
           fileType: file.type,
           preview,
           textContent,
+          location: showLocationField ? location.trim() : "",
         })
       ));
 
@@ -219,6 +224,19 @@ export default function UploadPage() {
               <option>Memories</option><option>Others</option>
             </select>
           </div>
+
+          {showLocationField && (
+            <div className="mb-6">
+              <label className="block font-semibold mb-2">Location</label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="Where was this taken? e.g. Goa, India"
+                className="w-full border rounded-xl p-4 focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+          )}
 
           <div className="mb-8">
             <label className="block font-semibold mb-3">Choose Files</label>

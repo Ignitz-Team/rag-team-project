@@ -172,6 +172,7 @@ export const POST = withErrorHandling(async function POST(req) {
     textContent,
     url,
     fileSize,
+    location,
   } = body;
 
   // ---- Stage 1.5: server-side PDF text extraction (client never extracts PDFs) ----
@@ -190,8 +191,8 @@ export const POST = withErrorHandling(async function POST(req) {
   // ---- Stage 2: persist memory row (Postgres) ----
   const result = await query(
     `INSERT INTO memories
-      (title, description, category, date, year, file_name, file_type, preview, text_content, url, file_size, user_email)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      (title, description, category, date, year, file_name, file_type, preview, text_content, url, file_size, user_email, location)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      RETURNING *`,
     [
       title || null,
@@ -206,6 +207,7 @@ export const POST = withErrorHandling(async function POST(req) {
       url || null,
       fileSize || 0,
       userEmail,
+      location || null,
     ]
   );
 
@@ -249,6 +251,7 @@ export const PATCH = withErrorHandling(async function PATCH(req) {
     "deleted",
     "deleted_at",
     "file_size",
+    "location",
   ];
 
   const entries = Object.entries(updates).filter(([key]) => allowed.includes(key));

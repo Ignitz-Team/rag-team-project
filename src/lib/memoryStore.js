@@ -18,6 +18,7 @@ function normalizeMemory(row) {
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     fileSize: row.file_size,
+    location: row.location,
     indexing: row.indexing,
   };
 }
