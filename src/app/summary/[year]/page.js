@@ -94,7 +94,10 @@ export default function YearSummaryPage() {
                     </span>
                     <div>
                       <p className="font-medium text-sm">{m.title}</p>
-                      <p className="text-xs text-gray-500">{m.category}</p>
+                      <p className="text-xs text-gray-500">
+                        {m.category}
+                        {m.location && <> · 📍 {m.location}</>}
+                      </p>
                     </div>
                   </div>
                   <span className="text-xs text-gray-400">{new Date(m.date).toLocaleDateString()}</span>
