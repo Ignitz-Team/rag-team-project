@@ -40,6 +40,10 @@ function toChunkResult(row) {
   };
 }
 
+function normalizeEmail(email) {
+  return typeof email === "string" ? email.trim().toLowerCase() : null;
+}
+
 // No-op kept for API compatibility with earlier Chroma-based code — there's
 // no separate collection to create, the table is set up by ensureTables().
 export async function initCollection() {
@@ -79,28 +83,30 @@ export async function addChunksBatch(chunks) {
 
   const values = [];
   const rows = normalized.map((chunk, index) => {
-    const base = index * 6;
+    const base = index * 7;
     values.push(
       chunk.id,
       chunk.metadata.memory_id ?? null,
       chunk.metadata.chunk_index ?? index,
       chunk.metadata.source_file || "unknown",
       chunk.text,
-      pgvector.toSql(chunk.embedding)
+      pgvector.toSql(chunk.embedding),
+      normalizeEmail(chunk.metadata.user_email)
     );
-    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`;
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`;
   });
 
   try {
     await query(
-      `INSERT INTO memory_chunks (id, memory_id, chunk_index, source_file, text, embedding)
+      `INSERT INTO memory_chunks (id, memory_id, chunk_index, source_file, text, embedding, user_email)
        VALUES ${rows.join(", ")}
        ON CONFLICT (id) DO UPDATE SET
          memory_id = EXCLUDED.memory_id,
          chunk_index = EXCLUDED.chunk_index,
          source_file = EXCLUDED.source_file,
          text = EXCLUDED.text,
-         embedding = EXCLUDED.embedding`,
+         embedding = EXCLUDED.embedding,
+         user_email = EXCLUDED.user_email`,
       values
     );
     console.log(`[vectorStore] addChunksBatch SUCCESS: wrote ${normalized.length} chunk(s) to memory_chunks.`);
@@ -111,10 +117,17 @@ export async function addChunksBatch(chunks) {
   }
 }
 
-// Query for the top K nearest chunks by cosine distance.
-export async function queryTopK(queryEmbedding, k = 5) {
+// Query for the top K nearest chunks by cosine distance, scoped to one
+// user's own documents. userEmail is required — without it this fails safe
+// (returns nothing) rather than risk searching across every user's data.
+export async function queryTopK(queryEmbedding, k = 5, userEmail = null) {
   if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) {
     console.warn(`[vectorStore] queryTopK: query embedding is empty (${typeof queryEmbedding}) — cannot search.`);
+    return [];
+  }
+  const email = normalizeEmail(userEmail);
+  if (!email) {
+    console.error("[vectorStore] queryTopK ABORTED: no userEmail provided — refusing to search across all users' data.");
     return [];
   }
 
@@ -122,11 +135,12 @@ export async function queryTopK(queryEmbedding, k = 5) {
     const result = await query(
       `SELECT id, memory_id, chunk_index, source_file, text, embedding <=> $1 AS distance
        FROM memory_chunks
+       WHERE user_email = $2
        ORDER BY embedding <=> $1
-       LIMIT $2`,
-      [pgvector.toSql(queryEmbedding), Math.max(1, Number(k) || 5)]
+       LIMIT $3`,
+      [pgvector.toSql(queryEmbedding), email, Math.max(1, Number(k) || 5)]
     );
-    console.log(`[vectorStore] queryTopK returned ${result.rows.length} result(s).`);
+    console.log(`[vectorStore] queryTopK returned ${result.rows.length} result(s) for user_email="${email}".`);
     return result.rows.map(toChunkResult);
   } catch (error) {
     console.error("[vectorStore] queryTopK FAILED:", error);
@@ -149,7 +163,7 @@ export async function deleteChunksByMemoryId(memoryId) {
 }
 
 // Backward-compatible wrapper used by the existing app code.
-export async function saveDocumentWithEmbeddings({ memoryId = null, source = null, chunks = [] }) {
+export async function saveDocumentWithEmbeddings({ memoryId = null, source = null, userEmail = null, chunks = [] }) {
   const normalizedChunks = (chunks || []).map((chunk, index) => ({
     id: chunk.id || `${memoryId || "memory"}-${index}`,
     text: chunk.text || "",
@@ -158,6 +172,7 @@ export async function saveDocumentWithEmbeddings({ memoryId = null, source = nul
       memory_id: memoryId != null ? String(memoryId) : null,
       source_file: source || chunk.source_file || "unknown",
       chunk_index: index,
+      user_email: userEmail,
       ...(chunk.metadata || {}),
     },
   }));
@@ -166,8 +181,8 @@ export async function saveDocumentWithEmbeddings({ memoryId = null, source = nul
   return { insertedIds, memoryId, source };
 }
 
-export async function similaritySearch(queryEmbedding, topK = 5) {
-  return queryTopK(queryEmbedding, topK);
+export async function similaritySearch(queryEmbedding, topK = 5, userEmail = null) {
+  return queryTopK(queryEmbedding, topK, userEmail);
 }
 
 // Diagnostic helper: used by this process and by scripts/check-vector-store.js.

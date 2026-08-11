@@ -39,9 +39,14 @@ export async function ensureTables() {
       deleted BOOLEAN DEFAULT FALSE,
       deleted_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW(),
-      file_size INTEGER DEFAULT 0
+      file_size INTEGER DEFAULT 0,
+      user_email TEXT
     );
   `);
+
+  // Migration for databases created before per-user scoping existed.
+  await query(`ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_email TEXT;`);
+  await query(`CREATE INDEX IF NOT EXISTS memories_user_email_idx ON memories (user_email);`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -73,9 +78,13 @@ export async function ensureTables() {
       source_file TEXT,
       text TEXT,
       embedding VECTOR(384),
+      user_email TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+
+  // Migration for databases created before per-user scoping existed.
+  await query(`ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS user_email TEXT;`);
 
   await query(`
     CREATE INDEX IF NOT EXISTS memory_chunks_embedding_idx
@@ -85,5 +94,10 @@ export async function ensureTables() {
   await query(`
     CREATE INDEX IF NOT EXISTS memory_chunks_memory_id_idx
       ON memory_chunks (memory_id);
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS memory_chunks_user_email_idx
+      ON memory_chunks (user_email);
   `);
 }

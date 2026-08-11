@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { embedText } from '@/lib/embeddings';
 import { queryTopK } from '@/lib/vectorStore';
 import { generateAnswerWithGroqLLM } from '@/lib/groqService';
+import { getSessionEmail } from '@/lib/session';
 
 // Chroma's cosine distance is lower for more similar documents. Results above
 // this threshold are weak matches and should not influence a general answer.
@@ -9,6 +10,9 @@ const MAX_CONTEXT_DISTANCE = 0.75;
 
 export async function POST(req) {
   try {
+    const userEmail = getSessionEmail(req);
+    if (!userEmail) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+
     const { question, topK } = await req.json();
     if (!question) return NextResponse.json({ error: 'Missing question' }, { status: 400 });
 
@@ -17,7 +21,7 @@ export async function POST(req) {
 
     try {
       const qVec = await embedText(question);
-      retrievedChunks = await queryTopK(qVec, resultLimit);
+      retrievedChunks = await queryTopK(qVec, resultLimit, userEmail);
     } catch (embeddingError) {
       // A retrieval outage should not stop the chatbot from answering normally.
       console.warn("Embedding retrieval unavailable; answering without document context:", embeddingError.message);

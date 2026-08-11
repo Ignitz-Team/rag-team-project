@@ -6,6 +6,7 @@ import { query, ensureTables } from "@/lib/db";
 import { embedTexts } from "@/lib/embeddings";
 import { saveDocumentWithEmbeddings, deleteChunksByMemoryId } from "@/lib/vectorStore";
 import { withErrorHandling } from "@/lib/apiRoute";
+import { getSessionEmail } from "@/lib/session";
 
 async function init() {
   await ensureTables();
@@ -100,6 +101,7 @@ async function indexMemory(memory) {
     const result2 = await saveDocumentWithEmbeddings({
       memoryId: memory.id,
       source: sourceFile,
+      userEmail: memory.user_email,
       chunks: chunks.map((text, index) => ({
         id: `memory-${memory.id}-chunk-${index}`,
         text,
@@ -130,17 +132,27 @@ async function removeMemoryFromIndex(memoryId) {
 
 export const GET = withErrorHandling(async function GET(req) {
   await init();
+  const userEmail = getSessionEmail(req);
+  if (!userEmail) {
+    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
   const url = new URL(req.url);
   const includeDeleted = url.searchParams.get("includeDeleted") === "true";
   const sql = includeDeleted
-    ? "SELECT * FROM memories ORDER BY created_at DESC"
-    : "SELECT * FROM memories WHERE deleted = false ORDER BY created_at DESC";
-  const result = await query(sql);
+    ? "SELECT * FROM memories WHERE user_email = $1 ORDER BY created_at DESC"
+    : "SELECT * FROM memories WHERE user_email = $1 AND deleted = false ORDER BY created_at DESC";
+  const result = await query(sql, [userEmail]);
   return NextResponse.json(result.rows);
 });
 
 export const POST = withErrorHandling(async function POST(req) {
   await init();
+  const userEmail = getSessionEmail(req);
+  if (!userEmail) {
+    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
   const body = await req.json();
   console.log(
     "[INGEST] Stage 1 — request body received. fileName=", body.fileName,
@@ -178,8 +190,8 @@ export const POST = withErrorHandling(async function POST(req) {
   // ---- Stage 2: persist memory row (Postgres) ----
   const result = await query(
     `INSERT INTO memories
-      (title, description, category, date, year, file_name, file_type, preview, text_content, url, file_size)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      (title, description, category, date, year, file_name, file_type, preview, text_content, url, file_size, user_email)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      RETURNING *`,
     [
       title || null,
@@ -193,6 +205,7 @@ export const POST = withErrorHandling(async function POST(req) {
       resolvedText || null,
       url || null,
       fileSize || 0,
+      userEmail,
     ]
   );
 
@@ -209,6 +222,11 @@ export const POST = withErrorHandling(async function POST(req) {
 
 export const PATCH = withErrorHandling(async function PATCH(req) {
   await init();
+  const userEmail = getSessionEmail(req);
+  if (!userEmail) {
+    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
   const body = await req.json();
   const ids = Array.isArray(body.ids) ? body.ids : [];
   const updates = normalizeUpdates(body.updates || {});
@@ -241,10 +259,13 @@ export const PATCH = withErrorHandling(async function PATCH(req) {
 
   const setClauses = entries.map(([key], index) => `${key} = $${index + 1}`);
   const params = entries.map(([, value]) => value);
-  params.push(ids);
+  const idsParamIndex = params.push(ids);
+  const emailParamIndex = params.push(userEmail);
 
   const result = await query(
-    `UPDATE memories SET ${setClauses.join(", ")} WHERE id = ANY($${params.length}) RETURNING *`,
+    `UPDATE memories SET ${setClauses.join(", ")}
+     WHERE id = ANY($${idsParamIndex}) AND user_email = $${emailParamIndex}
+     RETURNING *`,
     params
   );
 
@@ -272,6 +293,11 @@ export const PATCH = withErrorHandling(async function PATCH(req) {
 
 export const DELETE = withErrorHandling(async function DELETE(req) {
   await init();
+  const userEmail = getSessionEmail(req);
+  if (!userEmail) {
+    return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  }
+
   const body = await req.json();
   const ids = Array.isArray(body.ids) ? body.ids : [];
 
@@ -280,8 +306,8 @@ export const DELETE = withErrorHandling(async function DELETE(req) {
   }
 
   const result = await query(
-    "UPDATE memories SET deleted = true, deleted_at = NOW() WHERE id = ANY($1) RETURNING *",
-    [ids]
+    "UPDATE memories SET deleted = true, deleted_at = NOW() WHERE id = ANY($1) AND user_email = $2 RETURNING *",
+    [ids, userEmail]
   );
 
   for (const row of result.rows) {

@@ -1,6 +1,11 @@
 import { SignJWT, jwtVerify } from "jose";
 
 export const SESSION_COOKIE_NAME = "session";
+// Header middleware injects into the forwarded request once a session is
+// verified, so route handlers can scope data by user without re-verifying
+// the JWT themselves. Always set fresh by middleware, so a client can't
+// spoof it — see src/middleware.js.
+export const SESSION_EMAIL_HEADER = "x-session-email";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 export const SESSION_COOKIE_OPTIONS = {
@@ -37,4 +42,11 @@ export async function verifySessionToken(token) {
   } catch {
     return null;
   }
+}
+
+// Read the current user's email in an API route handler, from the header
+// middleware injects. Returns null if somehow missing (e.g. the route
+// isn't actually behind the middleware's auth gate).
+export function getSessionEmail(req) {
+  return req.headers.get(SESSION_EMAIL_HEADER) || null;
 }

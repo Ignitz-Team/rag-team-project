@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
+import { SESSION_COOKIE_NAME, SESSION_EMAIL_HEADER, verifySessionToken } from "@/lib/session";
 
 // Deny-by-default: everything not explicitly listed here requires a valid
 // session cookie. New pages/API routes are protected automatically unless
@@ -26,7 +26,11 @@ export async function middleware(req) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  // Forward the verified identity to route handlers via a request header —
+  // set fresh here every time, so a client-supplied header can't spoof it.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set(SESSION_EMAIL_HEADER, session.email);
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {

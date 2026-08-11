@@ -32,8 +32,12 @@ async function main() {
         deleted BOOLEAN DEFAULT FALSE,
         deleted_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        file_size INTEGER DEFAULT 0
+        file_size INTEGER DEFAULT 0,
+        user_email TEXT
       );
+
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS user_email TEXT;
+      CREATE INDEX IF NOT EXISTS memories_user_email_idx ON memories (user_email);
 
       CREATE TABLE IF NOT EXISTS users (
         id BIGSERIAL PRIMARY KEY,
@@ -60,14 +64,20 @@ async function main() {
         source_file TEXT,
         text TEXT,
         embedding VECTOR(384),
+        user_email TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      ALTER TABLE memory_chunks ADD COLUMN IF NOT EXISTS user_email TEXT;
 
       CREATE INDEX IF NOT EXISTS memory_chunks_embedding_idx
         ON memory_chunks USING hnsw (embedding vector_cosine_ops);
 
       CREATE INDEX IF NOT EXISTS memory_chunks_memory_id_idx
         ON memory_chunks (memory_id);
+
+      CREATE INDEX IF NOT EXISTS memory_chunks_user_email_idx
+        ON memory_chunks (user_email);
     `);
     console.log('Database initialized successfully.');
   } catch (error) {

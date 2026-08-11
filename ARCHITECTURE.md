@@ -97,7 +97,31 @@ values in `localStorage` (`userName`, `userEmail`, `userPhoto`, etc.) purely
 for rendering greetings/avatars without a round-trip — these are **not**
 what gates access; the cookie is.
 
-## 5. Data model (Postgres)
+## 5. Per-user data scoping
+
+Every memory and chunk belongs to exactly one user, identified by email
+(the one field both login paths reliably provide — password logins also
+have a Postgres `user.id`, but Google-only logins never get a `users` row,
+so `email` is the one common key). `src/middleware.js` verifies the session
+JWT once per request and forwards the email to route handlers via an
+`x-session-email` request header (`SESSION_EMAIL_HEADER` in
+`src/lib/session.js`) — set fresh on every request by middleware itself, so
+a client can't spoof it. Route handlers read it with `getSessionEmail(req)`
+instead of re-verifying the JWT themselves.
+
+Both `memories` and `memory_chunks` have a `user_email` column. Every query
+in `src/app/api/memories/route.js` and the RAG retrieval in
+`src/app/api/ai/query/route.js` filters or constrains by it:
+- `GET` only returns the caller's own memories.
+- `POST` stamps new memories with the caller's email.
+- `PATCH`/`DELETE` include `AND user_email = $current` in the `WHERE`
+  clause — not just a UI filter, so one user can't edit or delete another
+  user's memory even by guessing/passing its numeric id directly.
+- `queryTopK()` in `src/lib/vectorStore.js` requires a `userEmail` and
+  fails safe (returns nothing) if it's missing, rather than ever risking a
+  search across every user's documents.
+
+## 6. Data model (Postgres)
 
 Set up by `src/lib/db.js`'s `ensureTables()` (called lazily by API routes)
 and `scripts/init-db.js` (`npm run db:init`):
@@ -106,12 +130,13 @@ and `scripts/init-db.js` (`npm run db:init`):
 - **`otps`** — pending registration OTPs (`email, phone, otp_hash, expires_at`).
 - **`memories`** — every uploaded item: `title, description, category, date,
   year, file_name, file_type, preview (base64 data URL), text_content, url,
-  deleted, deleted_at, file_size`. Deletes are soft (`deleted = true`).
+  deleted, deleted_at, file_size, user_email`. Deletes are soft
+  (`deleted = true`).
 - **`memory_chunks`** — the RAG index: `id, memory_id (FK → memories),
-  chunk_index, source_file, text, embedding VECTOR(384)`, with an HNSW
-  cosine-distance index for fast nearest-neighbor search.
+  chunk_index, source_file, text, embedding VECTOR(384), user_email`, with
+  an HNSW cosine-distance index for fast nearest-neighbor search.
 
-## 6. Ingestion pipeline (upload → searchable)
+## 7. Ingestion pipeline (upload → searchable)
 
 Entry point: `POST /api/memories` in `src/app/api/memories/route.js`.
 
@@ -140,7 +165,7 @@ Entry point: `POST /api/memories` in `src/app/api/memories/route.js`.
 `text_content` re-chunks/re-embeds/re-indexes; deleting removes the memory's
 chunks from `memory_chunks` too.
 
-## 7. RAG retrieval & chat flow
+## 8. RAG retrieval & chat flow
 
 Entry point: `POST /api/ai/query` in `src/app/api/ai/query/route.js`, called
 from `src/app/chat/page.js`.
@@ -167,7 +192,7 @@ from `src/app/chat/page.js`.
 6. AI replies are rendered through `react-markdown` so formatted answers
    (bold, lists, code) display properly instead of as raw text.
 
-## 8. Everything else in the UI
+## 9. Everything else in the UI
 
 - **Dashboard** (`src/app/dashboard/page.js`) — memory count, recent
   activity feed, and a local (browser-notification-based) reminders
@@ -189,7 +214,7 @@ from `src/app/chat/page.js`.
   (`src/lib/userProfile.js`, keyed by email in `localStorage`) for extra
   fields like DOB/location that aren't part of the `users` table.
 
-## 9. Environment variables
+## 10. Environment variables
 
 See [.env.example](.env.example) for the full list. The two worth
 understanding rather than just copying:
@@ -200,7 +225,7 @@ understanding rather than just copying:
 - `SESSION_SECRET` — signs the auth cookie. Changing it invalidates every
   existing session (everyone gets logged out).
 
-## 10. Diagnostics
+## 11. Diagnostics
 
 - `node scripts/check-vector-store.js` — checks `DATABASE_URL` is
   reachable, the `vector` extension is installed, and reports the current
