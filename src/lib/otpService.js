@@ -1,12 +1,9 @@
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
-import pkg from "twilio";
-const { Twilio } = pkg;
 
 dotenv.config();
 
 const emailConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-const smsConfigured = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER);
 
 let transporter;
 function getTransporter() {
@@ -44,15 +41,24 @@ export async function sendOtpEmail(to, otp) {
   });
 }
 
-export async function sendOtpSms(to, otp) {
-  if (!smsConfigured) {
-    throw new Error("Twilio configuration is missing. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env.");
-  }
-
-  const client = new Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  await client.messages.create({
-    body: `Your Life Lens AI verification code is ${otp}`,
-    from: process.env.TWILIO_PHONE_NUMBER,
-    to,
-  });
-}
+// SMS delivery via Twilio was never configured for this project — email is
+// the only OTP channel actually in use (see sendOtpEmail above and
+// src/app/api/auth/send-otp/route.js). Left here, unused, in case SMS OTP
+// delivery is set up later.
+//
+// import pkg from "twilio";
+// const { Twilio } = pkg;
+// const smsConfigured = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER);
+//
+// export async function sendOtpSms(to, otp) {
+//   if (!smsConfigured) {
+//     throw new Error("Twilio configuration is missing. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env.");
+//   }
+//
+//   const client = new Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+//   await client.messages.create({
+//     body: `Your Life Lens AI verification code is ${otp}`,
+//     from: process.env.TWILIO_PHONE_NUMBER,
+//     to,
+//   });
+// }

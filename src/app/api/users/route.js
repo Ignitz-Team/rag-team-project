@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { query, ensureTables } from "@/lib/db";
+import { withErrorHandling } from "@/lib/apiRoute";
 
-export async function POST(req) {
+export const POST = withErrorHandling(async function POST(req) {
   await ensureTables();
   const body = await req.json();
   const { name, email, phone, password } = body;
@@ -28,9 +29,9 @@ export async function POST(req) {
   );
 
   return NextResponse.json(insertResult.rows[0], { status: 201 });
-}
+});
 
-export async function GET(req) {
+export const GET = withErrorHandling(async function GET(req) {
   await ensureTables();
   const url = new URL(req.url);
   const email = url.searchParams.get("email");
@@ -45,4 +46,4 @@ export async function GET(req) {
   }
 
   return NextResponse.json(result.rows[0]);
-}
+});

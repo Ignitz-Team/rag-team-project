@@ -2,6 +2,8 @@
 
 Life Lens AI is a Next.js application for managing memories, uploads, search, and chat with a retrieval-augmented generation (RAG) layer. Both relational data and vector embeddings live in a single Supabase Postgres database (via the [pgvector](https://github.com/pgvector/pgvector) extension) — no separate vector server to run or host.
 
+This README covers setup. For an explanation of how the app actually works — the auth/session model, the ingestion pipeline, the RAG retrieval flow, and what each page does — see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Project structure
 
 - [src/app](src/app) — Next.js app routes and API endpoints

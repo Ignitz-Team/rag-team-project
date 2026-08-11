@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { query, ensureTables } from "@/lib/db";
-import { sendOtpEmail, sendOtpSms } from "@/lib/otpService";
+import { sendOtpEmail } from "@/lib/otpService";
+import { withErrorHandling } from "@/lib/apiRoute";
 
 const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES || 15);
 
-export async function POST(req) {
+export const POST = withErrorHandling(async function POST(req) {
   await ensureTables();
   const body = await req.json();
   const email = body.email?.trim().toLowerCase();
@@ -35,13 +36,5 @@ export async function POST(req) {
 
   await sendOtpEmail(email, otp);
 
-  let smsSent = false;
-  try {
-    await sendOtpSms(phone, otp);
-    smsSent = true;
-  } catch (error) {
-    console.warn("SMS OTP not sent:", error.message);
-  }
-
-  return NextResponse.json({ emailSent: true, smsSent });
-}
+  return NextResponse.json({ emailSent: true });
+});

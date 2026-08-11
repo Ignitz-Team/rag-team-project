@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { query, ensureTables } from "@/lib/db";
 import { createSessionToken, SESSION_COOKIE_NAME, SESSION_COOKIE_OPTIONS } from "@/lib/session";
+import { withErrorHandling } from "@/lib/apiRoute";
 
-export async function POST(req) {
+export const POST = withErrorHandling(async function POST(req) {
   await ensureTables();
   const body = await req.json();
   const email = body.email?.trim().toLowerCase();
@@ -32,4 +33,4 @@ export async function POST(req) {
   const response = NextResponse.json({ id: user.id, name: user.name, email: user.email, phone: user.phone });
   response.cookies.set(SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
   return response;
-}
+});

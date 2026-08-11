@@ -5,6 +5,7 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { query, ensureTables } from "@/lib/db";
 import { embedTexts } from "@/lib/embeddings";
 import { saveDocumentWithEmbeddings, deleteChunksByMemoryId } from "@/lib/vectorStore";
+import { withErrorHandling } from "@/lib/apiRoute";
 
 async function init() {
   await ensureTables();
@@ -127,7 +128,7 @@ async function removeMemoryFromIndex(memoryId) {
   }
 }
 
-export async function GET(req) {
+export const GET = withErrorHandling(async function GET(req) {
   await init();
   const url = new URL(req.url);
   const includeDeleted = url.searchParams.get("includeDeleted") === "true";
@@ -136,9 +137,9 @@ export async function GET(req) {
     : "SELECT * FROM memories WHERE deleted = false ORDER BY created_at DESC";
   const result = await query(sql);
   return NextResponse.json(result.rows);
-}
+});
 
-export async function POST(req) {
+export const POST = withErrorHandling(async function POST(req) {
   await init();
   const body = await req.json();
   console.log(
@@ -204,9 +205,9 @@ export async function POST(req) {
   const indexing = await indexMemory(storedMemory);
 
   return NextResponse.json({ ...storedMemory, indexing });
-}
+});
 
-export async function PATCH(req) {
+export const PATCH = withErrorHandling(async function PATCH(req) {
   await init();
   const body = await req.json();
   const ids = Array.isArray(body.ids) ? body.ids : [];
@@ -267,9 +268,9 @@ export async function PATCH(req) {
   }));
 
   return NextResponse.json(rowsWithIndexing);
-}
+});
 
-export async function DELETE(req) {
+export const DELETE = withErrorHandling(async function DELETE(req) {
   await init();
   const body = await req.json();
   const ids = Array.isArray(body.ids) ? body.ids : [];
@@ -288,4 +289,4 @@ export async function DELETE(req) {
   }
 
   return NextResponse.json(result.rows);
-}
+});

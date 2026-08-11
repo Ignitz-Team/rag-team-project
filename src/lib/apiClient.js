@@ -3,9 +3,23 @@ const AUTH_API = "/api/auth";
 
 async function fetchJson(url, options) {
   const res = await fetch(url, options);
-  const data = await res.json();
+
+  // Read as text first — a server-side crash (missing env var, DB
+  // unreachable, etc.) can produce an empty or non-JSON body, and
+  // `res.json()` throws an unhelpful "Unexpected end of JSON input" in
+  // that case instead of surfacing what actually went wrong.
+  const raw = await res.text();
+  let data = null;
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // leave data as null; fall through to the status-based error below
+    }
+  }
+
   if (!res.ok) {
-    const error = data?.error || `Request failed with status ${res.status}`;
+    const error = data?.error || raw || `Request failed with status ${res.status}`;
     throw new Error(error);
   }
   return data;

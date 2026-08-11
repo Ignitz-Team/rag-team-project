@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { query, ensureTables } from "@/lib/db";
+import { withErrorHandling } from "@/lib/apiRoute";
 
-export async function POST(req) {
+export const POST = withErrorHandling(async function POST(req) {
   await ensureTables();
   const body = await req.json();
   const email = body.email?.trim().toLowerCase();
@@ -35,4 +36,4 @@ export async function POST(req) {
   }
 
   return NextResponse.json({ verified: true });
-}
+});

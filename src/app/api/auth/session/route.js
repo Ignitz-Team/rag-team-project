@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSessionToken, SESSION_COOKIE_NAME, SESSION_COOKIE_OPTIONS } from "@/lib/session";
+import { withErrorHandling } from "@/lib/apiRoute";
 
 // Mints our own session cookie for a user who already authenticated via the
 // Firebase client SDK (Google sign-in in src/app/login/page.js). There's no
@@ -8,7 +9,7 @@ import { createSessionToken, SESSION_COOKIE_NAME, SESSION_COOKIE_OPTIONS } from 
 // already completed — this matches the trust level the Google login path
 // already had before session cookies existed, it just now also gets a real
 // session instead of only a localStorage flag.
-export async function POST(req) {
+export const POST = withErrorHandling(async function POST(req) {
   const body = await req.json();
   const email = body?.email?.trim().toLowerCase();
   const name = body?.name?.trim();
@@ -21,4 +22,4 @@ export async function POST(req) {
   const response = NextResponse.json({ ok: true });
   response.cookies.set(SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
   return response;
-}
+});
